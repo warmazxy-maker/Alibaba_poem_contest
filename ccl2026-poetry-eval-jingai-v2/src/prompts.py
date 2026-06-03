@@ -9,10 +9,25 @@ from typing import Any
 
 @dataclass(frozen=True)
 class PromptTemplate:
+    """功能：保存一个阶段 prompt 的 system 和 user 模板。
+
+    字段：
+        system：系统提示词模板。
+        user：用户提示词模板，可使用 string.Template 风格变量。
+    """
+
     system: str
     user: str
 
     def render(self, **kwargs: str) -> list[dict[str, str]]:
+        """功能：把模板变量替换为具体内容，并生成 OpenAI chat 消息列表。
+
+        参数：
+            **kwargs：模板变量键值对，如 sample、context、task_id、task_name、task_description。
+
+        返回：
+            list[dict[str, str]]：包含 system 和 user 两条消息的 chat 格式列表。
+        """
         return [
             {"role": "system", "content": Template(self.system).safe_substitute(**kwargs)},
             {"role": "user", "content": Template(self.user).safe_substitute(**kwargs)},
@@ -21,6 +36,18 @@ class PromptTemplate:
 
 @dataclass(frozen=True)
 class TaskPrompt:
+    """功能：保存一个内部任务的元信息、执行轨道和输出契约。
+
+    字段：
+        task_id：内部任务编号，如 1-1、1-4、2-1、2-2。
+        track：任务轨道，如 basic_understanding、analogy_reasoning、critical_analysis。
+        name_zh：中文任务名。
+        name_en：英文任务名。
+        description：任务说明。
+        stages：该任务默认执行的 prompt 阶段序列。
+        output_contract：该任务期望输出的字段约束。
+    """
+
     task_id: str
     track: str
     name_zh: str
@@ -158,11 +185,37 @@ TEMPLATES: dict[str, PromptTemplate] = {
         user=(
             "任务：$task_id $task_name\n"
             "任务说明：$task_description\n\n"
-            "请从原题中抽取诗词文本、问题目标、关键词、候选答案与直接证据。"
-            "不要急于最终作答。\n\n"
+            "请从原题中抽取诗词文本、问题目标、关键词、候选答案与直接证据，"
+            "并给出第一版候选答案，供 Critic 复核。\n\n"
             "样本：\n$sample\n\n"
             "已有上下文：\n$context\n\n"
-            "请输出 JSON，字段包含 poem、question、target_span、options、evidence。"
+            "请输出 JSON，字段包含 poem、question、target_span、options、"
+            "ans_qa_words、ans_qa_sents、choose_id、candidate_answer、evidence、confidence。"
+        ),
+    ),
+    "task1_official_parse": PromptTemplate(
+        system=COMMON_SYSTEM,
+        user=(
+            "你正在处理官方 task1。必须直接完成题目，不要解释任务规则。\n\n"
+            "输入样本字段说明：\n"
+            "- title：诗题\n"
+            "- author：作者\n"
+            "- content：诗歌全文\n"
+            "- qa_words：需要解释的词语列表\n"
+            "- qa_sents：需要解释的诗句列表\n"
+            "- choose：情感理解选择题选项\n\n"
+            "样本：\n$sample\n\n"
+            "请输出合法 JSON，且只输出 JSON：\n"
+            "{\n"
+            "  \"ans_qa_words\": {\"词语原文\": \"该词在本诗语境中的具体含义\"},\n"
+            "  \"ans_qa_sents\": {\"诗句原文\": \"该诗句的现代汉语意思\"},\n"
+            "  \"choose_id\": \"A/B/C/D 中最符合全诗情感的一项\",\n"
+            "  \"reason\": \"选择该情感选项的简短依据\",\n"
+            "  \"evidence\": [\"诗中可作为依据的原句\"]\n"
+            "}\n\n"
+            "硬性要求：ans_qa_words 的键必须完全等于 qa_words 中的词；"
+            "ans_qa_sents 的键必须完全等于 qa_sents 中的句子；"
+            "不要把任务说明、评分标准、背景分析写进词义或句意。"
         ),
     ),
     "parser_relation": PromptTemplate(
@@ -174,7 +227,7 @@ TEMPLATES: dict[str, PromptTemplate] = {
             "关注对象、属性、动作、情感、意象、修辞、位置等可对齐维度。\n\n"
             "样本：\n$sample\n\n"
             "已有上下文：\n$context\n\n"
-            "请输出 JSON，字段包含 analogy_matrix 和 candidate_prediction。"
+            "请输出 JSON，字段包含 analogy_matrix、answer、candidate_prediction、confidence。"
         ),
     ),
     "parser_option_analysis": PromptTemplate(
@@ -186,7 +239,8 @@ TEMPLATES: dict[str, PromptTemplate] = {
             "典故或修辞是否一致。\n\n"
             "样本：\n$sample\n\n"
             "已有上下文：\n$context\n\n"
-            "请输出 JSON，字段包含 option_analysis，每项包含 option、score、reason、eliminated。"
+            "请输出 JSON，字段包含 option_analysis、candidate_answer、prediction，"
+            "option_analysis 每项包含 option、score、reason、eliminated。"
         ),
     ),
     "critic_debate": PromptTemplate(
@@ -198,7 +252,8 @@ TEMPLATES: dict[str, PromptTemplate] = {
             "歧义和反证，并给出是否支持当前候选答案。\n\n"
             "样本：\n$sample\n\n"
             "已有上下文：\n$context\n\n"
-            "请输出 JSON，字段包含 objections、supporting_evidence、revised_prediction。"
+            "请输出 JSON，字段包含 objections、supporting_evidence、revised_prediction、"
+            "revised_ans_qa_words、revised_ans_qa_sents、revised_choose_id、confidence。"
         ),
     ),
     "critic_option_scoring": PromptTemplate(
@@ -222,7 +277,30 @@ TEMPLATES: dict[str, PromptTemplate] = {
             "必须输出合法 JSON。\n\n"
             "样本：\n$sample\n\n"
             "已有上下文：\n$context\n\n"
-            "输出字段：prediction、reason、evidence。"
+            "输出字段：prediction、reason、evidence。若样本包含 qa_words、qa_sents 或 choose，"
+            "还必须输出 ans_qa_words、ans_qa_sents、choose_id。"
+        ),
+    ),
+    "task1_official_final": PromptTemplate(
+        system=COMMON_SYSTEM,
+        user=(
+            "你是官方 task1 的最终裁判。请根据样本和上下文，给出最终答案。"
+            "不要输出任务分析，不要复述规则，只输出合法 JSON。\n\n"
+            "样本：\n$sample\n\n"
+            "已有上下文：\n$context\n\n"
+            "最终 JSON 格式必须是：\n"
+            "{\n"
+            "  \"ans_qa_words\": {\"词语原文\": \"词语在本诗中的具体含义\"},\n"
+            "  \"ans_qa_sents\": {\"诗句原文\": \"诗句现代汉语意思\"},\n"
+            "  \"choose_id\": \"A/B/C/D\",\n"
+            "  \"reason\": \"不超过80字的理由\",\n"
+            "  \"evidence\": [\"依据原句\"]\n"
+            "}\n\n"
+            "检查要求：\n"
+            "1. ans_qa_words 必须逐个解释 qa_words，不允许所有词共用同一段泛化文字。\n"
+            "2. ans_qa_sents 必须逐句翻译 qa_sents，不允许写任务说明。\n"
+            "3. choose_id 只能是 A、B、C、D 中一个。\n"
+            "4. 如果上下文里有泛化任务说明，应忽略它，按诗歌内容重新作答。"
         ),
     ),
     "umpire_matrix_align": PromptTemplate(
@@ -234,7 +312,7 @@ TEMPLATES: dict[str, PromptTemplate] = {
             "必须输出合法 JSON。\n\n"
             "样本：\n$sample\n\n"
             "已有上下文：\n$context\n\n"
-            "输出字段：prediction、reason、analogy_matrix。"
+            "输出字段：prediction、answer、reason、analogy_matrix。answer 必须是字符串数组。"
         ),
     ),
     "umpire_vote": PromptTemplate(
@@ -246,19 +324,36 @@ TEMPLATES: dict[str, PromptTemplate] = {
             "最终 prediction 只能是唯一选项，如 A、B、C、D。\n\n"
             "样本：\n$sample\n\n"
             "已有上下文：\n$context\n\n"
-            "输出字段：prediction、reason、votes。"
+            "输出字段：prediction、answer、reason、votes。prediction 和 answer 必须是同一个唯一选项。"
         ),
     ),
 }
 
 
 def get_task_prompt(task_id: str) -> TaskPrompt:
+    """功能：根据内部任务编号读取任务配置。
+
+    参数：
+        task_id：内部任务编号，如 1-1、1-4、2-1、2-2。
+
+    返回：
+        TaskPrompt：对应任务的配置对象。
+    """
     if task_id not in TASK_PROMPTS:
         raise KeyError(f"Unknown task id: {task_id}")
     return TASK_PROMPTS[task_id]
 
 
 def render_prompt(name: str, **kwargs: str) -> list[dict[str, str]]:
+    """功能：根据阶段名称渲染 prompt。
+
+    参数：
+        name：阶段 prompt 名称，如 parser_raw_extract、umpire_vote。
+        **kwargs：模板变量键值对。
+
+    返回：
+        list[dict[str, str]]：OpenAI chat 格式消息列表。
+    """
     if name not in TEMPLATES:
         raise KeyError(f"Unknown prompt template: {name}")
     return TEMPLATES[name].render(**kwargs)

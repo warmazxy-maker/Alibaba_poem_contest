@@ -20,6 +20,14 @@ from src.tools import (
 
 
 def resolve_project_path(path: str | Path) -> Path:
+    """功能：把相对路径解析为项目根目录下的绝对路径。
+
+    参数：
+        path：待解析的文件路径，可以是绝对路径或相对路径。
+
+    返回：
+        Path：解析后的绝对路径；如果输入已经是绝对路径则原样返回。
+    """
     resolved = Path(path)
     if resolved.is_absolute():
         return resolved
@@ -27,6 +35,15 @@ def resolve_project_path(path: str | Path) -> Path:
 
 
 def evaluate(gold_items: list[dict[str, Any]], predictions: list[dict[str, Any]]) -> dict[str, Any]:
+    """功能：对普通 JSON 数组格式的预测结果做精确匹配评测。
+
+    参数：
+        gold_items：标准答案列表，每一项是一个样本字典。
+        predictions：预测结果列表，每一项是一个预测字典。
+
+    返回：
+        dict[str, Any]：评测指标字典，包含 total、correct、accuracy、missing、mismatch_count 和 mismatches。
+    """
     prediction_by_id = {
         get_sample_id(row, index): extract_prediction(row)
         for index, row in enumerate(predictions)
@@ -63,6 +80,15 @@ def evaluate(gold_items: list[dict[str, Any]], predictions: list[dict[str, Any]]
 
 
 def evaluate_official(gold_data: dict[str, list[dict[str, Any]]], pred: dict[str, Any]) -> dict[str, Any]:
+    """功能：对官方 task1-task4 提交格式做轻量精确匹配评测。
+
+    参数：
+        gold_data：官方训练集或标准答案数据，键为 task1、task2、task3、task4。
+        pred：官方提交格式的预测结果，键为 task1、task2、task3、task4。
+
+    返回：
+        dict[str, Any]：按任务划分的指标字典，每个任务包含 total、correct 和 accuracy。
+    """
     metrics: dict[str, Any] = {}
     for task_name in TASK_NAMES:
         gold_rows = gold_data[task_name]
@@ -84,10 +110,19 @@ def evaluate_official(gold_data: dict[str, list[dict[str, Any]]], pred: dict[str
                 continue
             if task_name == "task1":
                 total += 1
-                if row.get("choose_id") == gold.get("choose_id"):
+                if "choose_id" in gold and row.get("choose_id") == gold.get("choose_id"):
+                    correct += 1
+                elif (
+                    "keywords" in gold
+                    and row.get("keywords") == gold.get("keywords")
+                    and row.get("trans") == gold.get("trans")
+                    and row.get("emotion") == gold.get("emotion")
+                ):
                     correct += 1
             elif task_name == "task2":
-                continue
+                total += 1
+                if row.get("answer") == gold.get("answer"):
+                    correct += 1
             elif task_name == "task3":
                 total += 1
                 if row.get("answer") == gold.get("answer"):
@@ -107,6 +142,11 @@ def evaluate_official(gold_data: dict[str, list[dict[str, Any]]], pred: dict[str
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """功能：构造本地评测脚本的命令行参数解析器。
+
+    返回：
+        argparse.ArgumentParser：包含标准答案路径、预测路径、指标输出路径和官方格式开关的解析器。
+    """
     parser = argparse.ArgumentParser(description="Evaluate submission exact-match accuracy.")
     parser.add_argument("--gold", default="data/train.json", help="Gold data path.")
     parser.add_argument("--pred", default="data/submission.json", help="Prediction JSON path.")
@@ -116,6 +156,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
+    """功能：本地评测脚本入口，根据参数选择普通格式或官方格式评测并打印指标。"""
     args = build_parser().parse_args()
     if args.official:
         gold = OfficialDataIO(train_dir=args.gold).load_all_train()

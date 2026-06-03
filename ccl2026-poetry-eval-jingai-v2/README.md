@@ -2,9 +2,11 @@
 
 Project scaffold for a CCL 2026 poetry evaluation workflow.
 
-`src/pipeline.py` is the main controller. It dispatches each sample to the
-right task track, calls the Agent matrix, invokes the core Tools functions, and
-writes `data/submission.json`. `evaluate.py` is only a local evaluation script.
+`run_submission.py` is the official command-line entrypoint. `src/pipeline.py`
+is the core controller module: it dispatches each sample to the right task
+track, calls the Agent matrix, invokes the core Tools functions, and returns
+results for the official adapters. `evaluate.py` is only a local evaluation
+script.
 
 ## Layout
 
@@ -23,6 +25,7 @@ ccl2026-poetry-eval/
     prompts.py     # 1-1 to 2-2 task prompts and stage prompts
     pipeline.py    # main controller
   evaluate.py      # local evaluator, not the controller
+  run_submission.py # official submission entrypoint
   requirements.txt
 ```
 
@@ -30,7 +33,7 @@ ccl2026-poetry-eval/
 
 - Student A: `src/config.py`, `src/llm_client.py`, `src/agents.py`, `src/tools.py`
 - Student B: `src/prompts.py`
-- Student C: `data/`, `src/pipeline.py`, `evaluate.py`
+- Student C: `data/`, `src/pipeline.py`, `run_submission.py`, `evaluate.py`
 
 ## Required workflow
 
@@ -57,10 +60,10 @@ Task tracks:
 
 ## Quick start
 
-Run the pipeline in dry-run mode:
+Run the official submission pipeline in dry-run mode:
 
 ```bash
-python -m src.pipeline --input data/test.json --output data/submission.json --dry-run
+python run_submission.py --test-dir ../CCPA2026-test_data --output outputs/submission.json --dry-run
 ```
 
 Run local exact-match evaluation:
